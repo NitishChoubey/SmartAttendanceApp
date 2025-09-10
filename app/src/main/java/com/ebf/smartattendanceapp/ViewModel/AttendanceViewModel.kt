@@ -2,15 +2,16 @@ package com.ebf.smartattendanceapp.ViewModel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ebf.smartattendanceapp.Network.AttendanceRepository
 import com.ebf.smartattendanceapp.UltrasonicDetector.UltrasonicDetector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 
 class AttendanceViewModel : ViewModel() {
@@ -19,6 +20,8 @@ class AttendanceViewModel : ViewModel() {
 
     private val ultrasonicDetector = UltrasonicDetector()
     private var listeningJob: Job? = null
+    private val attendanceRepository = AttendanceRepository()
+    private var hasMarkedAttendance = false
 
     fun onPermissionsGranted() {
         if (_state.value == AttendanceState.REQUESTING_PERMISSIONS) {
@@ -66,9 +69,15 @@ class AttendanceViewModel : ViewModel() {
     }
 
     fun onQrScanned(qrValue: String?) {
-        if (_state.value == AttendanceState.SCANNING) {
+        if (_state.value == AttendanceState.SCANNING && !hasMarkedAttendance) {
             if (qrValue != null && qrValue.startsWith("CLASS_SESSION_")) {
-                _state.value = AttendanceState.SUCCESS
+                hasMarkedAttendance = true
+                viewModelScope.launch {
+                    val success = withContext(Dispatchers.IO) {
+                        attendanceRepository.markAttendance(qrValue)
+                    }
+                    _state.value = if (success) AttendanceState.SUCCESS else AttendanceState.FAILURE
+                }
             } else {
                 // This would be a failure in a real app if an invalid QR is scanned
                 // For prototype, we'll keep it in scanning state.
@@ -78,6 +87,7 @@ class AttendanceViewModel : ViewModel() {
 
     fun resetState() {
         _state.value = AttendanceState.REQUESTING_PERMISSIONS
+        hasMarkedAttendance = false
     }
 
     override fun onCleared() {
